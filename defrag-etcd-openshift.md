@@ -70,12 +70,12 @@ Execute:
 
   oc exec -n openshift-etcd <etcd-pod> -c etcd -- etcdctl endpoint status -w table --cluster
 
-Verifique:
+<b>Verifique:</b>
 	•	Redução do DB SIZE
 	•	Alarms desarmados
 	•	Todos os endpoints acessíveis
 
-📝 Observações Importantes
+<b>Observações Importantes</b>
 	•	Não execute defrag simultâneo nos nós.
 	•	O líder deve sempre ser o último a receber defrag.
 	•	Pequenos picos de latência do API Server podem ocorrer durante o processo.
