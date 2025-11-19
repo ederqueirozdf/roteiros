@@ -4,15 +4,14 @@
 
 Para baixar o binário do ArgoCD CLI, acesse o endpoint `/help` da instância do Argo:
 
-https://.nuvem.bb.com.br/help
+https://openshift-gitops.xpto.com/help
 
 ---
 
 ## 2. Capturar senha de instalação e URL da instância
 
-### Obter senha do usuário `admin`
+Obter senha do usuário `admin`
 
-    ```bash
     ADMIN_PASSWD=$(
       oc get secret "<nome-da-instancia-do-argo>-cluster" \
       -n "<namespace-da-instancia-do-argo>" \
@@ -21,7 +20,6 @@ https://.nuvem.bb.com.br/help
 
 Obter URL da instância (rota do servidor)
 
-    ```bash
     SERVER_URL=$(
       oc get route "<nome-da-instancia-do-argo>-server" \
       -n "<namespace-da-instancia-do-argo>" \
@@ -49,8 +47,6 @@ Caso o comando acima retorne erro de autenticação do Redis, crie a Secret argo
 
 Arquivo redis.yaml:
 
-```yaml
-
     apiVersion: v1
     kind: Secret
     metadata:
@@ -65,5 +61,4 @@ Arquivo redis.yaml:
 Observação
 Certifique-se de aplicar a Secret com:
 
-```bash
-oc apply -f redis.yaml
+    oc apply -f redis.yaml
