@@ -1,0 +1,126 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: openshift-etcd
+  name: etcd-cleaner-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: etcd-cleaner-rb
+  namespace: openshift-etcd
+subjects:
+- kind: ServiceAccount
+  name: etcd-cleaner
+  namespace: openshift-etcd
+roleRef:
+  kind: Role
+  name: etcd-cleaner-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-event-cleaner
+  namespace: openshift-etcd
+spec:
+  schedule: "*/45 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: etcd-cleaner
+          restartPolicy: Never
+          containers:
+          - name: cleaner
+            image: registry.redhat.io/openshift4/ose-cli
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "[INFO] Localizando pod do etcd..."
+            
+              ETCD_POD=$(oc get pods -n openshift-etcd -l app=etcd -o jsonpath='{.items[0].metadata.name}')
+            
+              echo "[INFO] Pod identificado: $ETCD_POD"
+              echo "[INFO] Iniciando limpeza de eventos no etcd..."
+            
+              oc rsh -n openshift-etcd $ETCD_POD /bin/bash -c '
+                set -e
+            
+                # LIMITE MÍNIMO DE EVENTOS PARA EXECUTAR O CLEANER
+                MIN_EVENTS=10000
+            
+                echo "[INFO] Contando eventos atuais..."
+                TOTAL_EVENTS=$(etcdctl --command-timeout=60s get "/kubernetes.io/events/" \
+                                --prefix --keys-only | grep -c "/kubernetes.io/events/" || true)
+            
+                echo "[INFO] Total atual de eventos: ${TOTAL_EVENTS}"
+            
+                if [ "${TOTAL_EVENTS}" -lt "${MIN_EVENTS}" ]; then
+                  echo "[INFO] Eventos abaixo de ${MIN_EVENTS}. Nada a limpar. Encerrando."
+                  exit 0
+                fi
+            
+                COUNT=10000
+                FROM="$(etcdctl --command-timeout=60s get "/kubernetes.io/events/" --prefix --keys-only --limit 1)"
+            
+                while :; do
+            
+                  # Reavalia quantidade de eventos a cada ciclo
+                  CURRENT=$(etcdctl --command-timeout=60s get "/kubernetes.io/events/" \
+                              --prefix --keys-only | grep -c "/kubernetes.io/events/" || true)
+            
+                  echo "[INFO] Eventos restantes: ${CURRENT}"
+            
+                  if [ "${CURRENT}" -lt "${MIN_EVENTS}" ]; then
+                    echo "[INFO] Eventos chegaram abaixo de ${MIN_EVENTS}. Encerrando limpeza."
+                    break
+                  fi
+            
+                  TO="$(etcdctl get "/kubernetes.io/events/" --command-timeout=60s \
+                        --prefix --keys-only --limit ${COUNT} | sed "/^$/d" | tail -1)"
+            
+                  # Proteção de segurança
+                  if [ $(etcdctl get ${FROM} ${TO} --command-timeout=60s --keys-only \
+                        | grep -vEc "^$|^/kubernetes.io/events/") -ne 0 ]; then
+                    echo "[ERROR] Chave fora do prefixo events encontrada. Abortando!"
+                    exit 1
+                  fi
+            
+                  NUM=$(etcdctl --command-timeout=60s del ${FROM} ${TO})
+            
+                  if [ "${NUM}" = "0" ]; then
+                    echo "[INFO] Não há mais eventos para deletar."
+                    break
+                  fi
+            
+                  echo "[INFO] ${NUM} eventos deletados..."
+                done
+            
+                echo "[INFO] Limpeza concluída com sucesso."
+              '            
+              
+          # tolerations para rodar em master
+          tolerations:
+          - key: "node-role.kubernetes.io/master"
+            operator: "Exists"
+            effect: "NoSchedule"
+          - key: "node-role.kubernetes.io/control-plane"
+            operator: "Exists"
+            effect: "NoSchedule"
+ 
+          # garantir que este job sempre rodará em master
+          nodeSelector:
+            node-role.kubernetes.io/master: ""
