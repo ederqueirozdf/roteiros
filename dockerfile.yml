@@ -1,0 +1,65 @@
+# Use Red Hat Universal Base Image 9
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+# Instalar PHP 8.2 e extensões necessárias para WordPress
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm && \
+    dnf module reset php -y && \
+    dnf module enable php:remi-8.2 -y && \
+    dnf install -y \
+    php \
+    php-fpm \
+    php-mysqlnd \
+    php-gd \
+    php-xml \
+    php-mbstring \
+    php-json \
+    php-curl \
+    php-zip \
+    php-intl \
+    php-soap \
+    php-opcache \
+    httpd \
+    wget \
+    unzip && \
+    dnf clean all
+
+# Baixar e instalar WordPress
+WORKDIR /var/www/html
+RUN wget https://wordpress.org/latest.tar.gz && \
+    tar -xzf latest.tar.gz && \
+    mv wordpress/* . && \
+    rm -rf wordpress latest.tar.gz && \
+    chown -R apache:apache /var/www/html
+
+# Configurar PHP-FPM para trabalhar com Apache
+RUN sed -i 's/listen = \/run\/php-fpm\/www.sock/listen = 127.0.0.1:9000/' /etc/php-fpm.d/www.conf && \
+    sed -i 's/;listen.owner = nobody/listen.owner = apache/' /etc/php-fpm.d/www.conf && \
+    sed -i 's/;listen.group = nobody/listen.group = apache/' /etc/php-fpm.d/www.conf
+
+# Configurar Apache para WordPress
+RUN echo '<VirtualHost *:80>' > /etc/httpd/conf.d/wordpress.conf && \
+    echo '    DocumentRoot /var/www/html' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '    <Directory /var/www/html>' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '        AllowOverride All' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '        Require all granted' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '    </Directory>' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '    <FilesMatch \.php$>' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '        SetHandler "proxy:fcgi://127.0.0.1:9000"' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '    </FilesMatch>' >> /etc/httpd/conf.d/wordpress.conf && \
+    echo '</VirtualHost>' >> /etc/httpd/conf.d/wordpress.conf
+
+# Criar diretório de configuração do WordPress
+RUN cp /var/www/html/wp-config-sample.php /var/www/html/wp-config.php 2>/dev/null || true
+
+# Expor porta 80
+EXPOSE 80
+
+# Script de inicialização
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'php-fpm -D' >> /start.sh && \
+    echo 'httpd -D FOREGROUND' >> /start.sh && \
+    chmod +x /start.sh
+
+# Iniciar PHP-FPM e Apache
+CMD ["/start.sh"]
